@@ -1,3 +1,9 @@
 /.idea
 /.venv
 /lab1/__pycache__
+__pycache__/
+/.venv-labs/
+/data/
+/lab2/.venv/
+/lab3/.venv/
+/lab3/runs/*/model.pt

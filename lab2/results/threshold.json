@@ -1,0 +1,5 @@
+{
+  "threshold": 0.031194020062685013,
+  "rule": "score >= threshold",
+  "chosen_on": "validation"
+}

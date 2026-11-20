@@ -1,0 +1,42 @@
+[
+  {
+    "file": "20179.jpg",
+    "true": "glacier",
+    "predicted": "mountain",
+    "probability": 0.8772450685501099,
+    "pair_count": 49,
+    "interpretation": "Ймовірна помилка розмітки: переважають скелясті гірські схили й долина, а виразний льодовик у кадрі не видно."
+  },
+  {
+    "file": "20116.jpg",
+    "true": "mountain",
+    "predicted": "glacier",
+    "probability": 0.6006912589073181,
+    "pair_count": 40,
+    "interpretation": "Сцена містить обидва класи: засніжений гірський схил візуально неоднозначний між mountain і glacier."
+  },
+  {
+    "file": "20083.jpg",
+    "true": "buildings",
+    "predicted": "street",
+    "probability": 0.5937610268592834,
+    "pair_count": 27,
+    "interpretation": "Помилка моделі на однозначному зображенні: головним об'єктом є комплекс будівель навколо внутрішнього двору, який модель сприйняла як street."
+  },
+  {
+    "file": "20353.jpg",
+    "true": "street",
+    "predicted": "buildings",
+    "probability": 0.8439236879348755,
+    "pair_count": 12,
+    "interpretation": "Сцена містить обидва класи: вузька вулиця майже повністю заповнена фасадами будівель."
+  },
+  {
+    "file": "20243.jpg",
+    "true": "glacier",
+    "predicted": "sea",
+    "probability": 0.8064787983894348,
+    "pair_count": 10,
+    "interpretation": "Сцена містить обидва класи: лід і засніжені гори поєднані з великою поверхнею відкритої води, яка нагадує sea."
+  }
+]
