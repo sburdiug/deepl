@@ -179,82 +179,71 @@ def main() -> None:
     plt.close(fig)
     write_json(out / "errors.json", errors)
     checks = json.loads((out / "checks.json").read_text(encoding="utf-8"))
-    sections = ["## Результати", "### Перевірки до навчання", markdown(control),
-                "Файли між частинами не перетинаються; всі 18 контрольних клітинок збігаються.",
-                "![Навчальний пакет](figures/batch.png)",
-                markdown([{"regime": k, "initial_loss": v, "ln(6)": float(np.log(6))}
-                          for k, v in checks["initial_loss"].items()]),
-                "Початкова втрата не мусить дорівнювати ln(6): випадкова голова дає нерівні ймовірності, "
-                "а розподіли ознак у scratch і frozen різні.",
-                markdown([{**{k: v for k, v in r.items() if k != "groups"}, "groups": str(r["groups"])}
-                          for r in checks["parameters"]])]
-    for mode in checks["modes"]:
-        sections.extend([f"Режим `{mode['regime']}` після 5 кроків:", markdown(mode["modules"])])
-    sections.extend(["### Навмисна помилка BatchNorm", "Прогноз до досліду: " + checks["bn_prediction"],
-                     markdown(checks["bn_bug"]["modules"]),
-                     "Максимальні абсолютні зміни layer1.0.bn1: " + str(checks["bn_bug"]["layer1.0.bn1_max_changes"]),
-                     f"Train-loss у досліді з помилкою: {checks['bn_bug']['losses'][0]:.6f} -> "
-                     f"{checks['bn_bug']['losses'][-1]:.6f}. Його спад не показує, що BN кістяка змінився.",
-                     "Прогноз підтвердився. requires_grad керує градієнтами параметрів, а не буферами BN. "
-                     "У layer4 режиму unfreeze ці буфери мають оновлюватися разом із навчанням стадії.",
-                     "### Сім запусків", markdown(rows), "![Криві](figures/curves.png)",
-                     "### Розклад ефектів", markdown([{"quantity": k, "value": v} for k, v in effect.items()])])
-    for name, key in (("Попереднє навчання", "delta_pre"), ("Розморожування", "delta_unf")):
-        value = effect[key]
-        verdict = "не відрізняється від розкиду; результату немає" if abs(value) <= effect["R"] else "перевищує розкид; вартий перевірки, але не доведений"
-        sections.append(f"{name}: напрям {'додатний' if value > 0 else 'від’ємний' if value < 0 else 'нульовий'}, "
-                        f"величина {100 * value:.4f} пунктів macro-F1; R = {100 * effect['R']:.4f} пунктів; {verdict}.")
-    times = {r: float(np.mean([v["training_seconds"] for v in logs if v["regime"] == r]))
-             for r in ("scratch", "frozen", "unfreeze")}
-    scratch = logs[0]["history"]
-    sections.extend([
-        "Зерно змінює всі початкові ваги в scratch, лише нову голову у frozen/unfreeze, "
-        "а також порядок пакетів та аугментації у всіх режимах. Розморожування додає шляхи зміни "
-        "параметрів і BN, тому розкид може відрізнятися.",
-        f"R оцінено лише для frozen/unfreeze: розкид scratch за одним запуском невідомий, тому "
-        f"висновок про delta_pre умовний щодо scratch seed=1. Його train-loss: "
-        f"{scratch[0]['train_loss']:.6f} -> {scratch[-1]['train_loss']:.6f}; validation F1: "
-        f"{scratch[0]['validation_f1']:.6f} -> {scratch[-1]['validation_f1']:.6f}.",
-        f"Максимум validation F1 на кривій scratch за 8 епох: "
-        f"{max(e['validation_f1'] for e in scratch):.6f}; мінімум підсумкових F1 frozen: "
-        f"{min(r['history'][-1]['validation_f1'] for r in logs if r['regime'] == 'frozen'):.6f}. "
-        "Це допомагає оцінити відставання в цьому запуску, але не замінює повторів scratch із різними зернами.",
-        f"Однакові 304 кроки не означають однаковий час: середні секунди {times}. "
-        "Час охоплює цикл восьми епох разом із validation, без завантаження ваг і початкових перевірок.",
-        "### Вибір і test",
-        f"За найбільшим середнім validation macro-F1 вибрано `{chosen['regime']}`, "
-        f"потім найкращий його запуск seed={chosen['seed']}. За точних нічиїх використовується порядок "
-        "scratch, frozen, unfreeze та менше зерно.",
-        "Вибір між frozen/unfreeze визначається шумом." if abs(effect["delta_unf"]) <= effect["R"] else "Різниця frozen/unfreeze перевищує прийнятий поріг шуму.",
-        f"Test macro-F1 = **{f1:.8f}**, validation обраного запуску = **{validation_f1:.8f}**. "
-        f"Різниця test − validation дорівнює {f1_gap:+.8f}. Accuracy = {accuracy:.8f}, "
-        f"SE accuracy = {se:.8f} при n={len(y)}. SE accuracy дає лише грубий орієнтир масштабу варіації. "
-        "Стандартну похибку для macro-F1 не оцінювали.",
-        "Вибір найкращого seed може завищувати оцінку validation в середньому. "
-        + ("У цьому досліді завищення не спостерігаємо."
-           if f1_gap >= 0 else "У цьому досліді macro-F1 на validation вища.")
-        + " Через скінченний розмір і різний склад вибірок розрив може змінюватися за розміром і знаком.",
+    split_cells = {(item["class"], item["part"]): f"{item['count']} / {item['sum']}" for item in control}
+    split_table = [{"class": label, **{part: split_cells[label, part] for part in ("train", "validation", "test")}}
+                   for label in CLASSES]
+    params = [{"regime": item["regime"], "total": item["total"], "trainable": item["trainable"],
+               "groups (numel × lr)": ", ".join(f"{group['parameters']} × {group['lr']:g}" for group in item["groups"])}
+              for item in checks["parameters"]]
+    mode_records = [*checks["modes"], checks["bn_bug"]]
+    mode_table = []
+    for modules in zip(*(mode["modules"] for mode in mode_records), strict=True):
+        row = {"module": modules[0]["module"]}
+        for name, module in zip(("frozen", "unfreeze", "frozen + model.train()"), modules, strict=True):
+            param = "+" if module["parameters_changed"] else "−"
+            bn = "—" if module["bn_changed"] is None else "+" if module["bn_changed"] else "−"
+            row[name] = f"{param} / {bn}"
+        mode_table.append(row)
+    initial = checks["initial_loss"]
+    bn_changes = checks["bn_bug"]["layer1.0.bn1_max_changes"]
+    losses = checks["bn_bug"]["losses"]
+    pre, unf, noise = (100 * effect[key] for key in ("delta_pre", "delta_unf", "R"))
+    time_frozen = np.mean([r["training_seconds"] for r in logs if r["regime"] == "frozen"])
+    recommendation = "frozen" if abs(unf) <= noise else chosen["regime"]
+    sections = [
+        "## Результати",
+        f"Обрали {chosen['regime']}, seed {chosen['seed']}. Macro-F1 на test — **{f1:.6f}**.",
+        "### Перевірки перед навчанням",
+        "Усі 18 контрольних клітинок збіглися, перетинів між частинами немає. У таблиці подано кількість і суму імен.",
+        markdown(split_table),
+        f"Початкова втрата — {initial['scratch']:.4f} для scratch і {initial['frozen']:.4f} для frozen. "
+        f"Рівномірний прогноз дає ln(6) = {np.log(6):.4f}, а випадкова голова дає різні ймовірності. "
+        "[Пакет із перших 16 зображень](figures/batch.png)",
+        markdown(params),
+        "Після п’яти кроків перевірили зміни «параметри / статистики BN». + означає зміну, − — без змін, "
+        "— — модуль без BN. Усі перевірки збіглися з очікуваннями.",
+        markdown(mode_table),
+        "У досліді з навмисною помилкою прогнозували зміну буферів BN, сталі ваги кістяка і можливий спад loss. "
+        f"Так і сталося. У layer1.0.bn1 зміна running_mean = {bn_changes['running_mean']:.6f}, "
+        f"running_var = {bn_changes['running_var']:.6f}. Loss впав з {losses[0]:.6f} до {losses[-1]:.6f}. "
+        "requires_grad=False вимикає градієнти параметрів, а статистики BN оновлюються в прямому проході. "
+        "В unfreeze статистики BN у layer4 мають оновлюватися разом із параметрами цього блоку. [Перевірки](checks.json)",
+        "### Сім запусків та ефекти", markdown(rows),
+        "[Криві навчання й validation](figures/curves.png) · [Повні журнали](runs)",
+        markdown([{"regime": name, "mean validation F1": effect[f"mean_{name}"],
+                   "range": effect[f"range_{name}"]} for name in ("frozen", "unfreeze")]),
+        f"За 304 кроки ефект переднавчання **{pre:+.2f} п.п.**, ефект розморожування **{unf:+.2f} п.п.**, "
+        f"поріг шуму R = **{noise:.2f} п.п.** "
+        + ("Переднавчання перевищує розкид. " if abs(pre) > noise else "Ефект переднавчання в межах розкиду. ")
+        + ("Розморожування в межах розкиду. " if abs(unf) <= noise else "Розморожування перевищує розкид. ")
+        + f"Scratch має лише одне зерно. Його найкращий validation F1 за 8 епох — "
+        f"{max(epoch['validation_f1'] for epoch in logs[0]['history']):.3f}. Триваліше навчання могло б зменшити відставання.",
+        "Зерно змінює порядок пакетів, аугментації та початкові ваги навчуваних з нуля шарів. "
+        "У unfreeze додатково оновлюються параметри й BN layer4, тому розкид може відрізнятися. "
+        f"За однакової кількості кроків час різний. Frozen у середньому зайняв {time_frozen:.1f} с із validation. "
+        f"Для 200 зображень на клас за подібного бюджету обрали б {recommendation}.",
+        "### Test",
+        f"Macro-F1 обраного запуску на validation — {validation_f1:.6f}, різниця test − validation — {f1_gap:+.6f}. "
+        f"Accuracy = {accuracy:.6f}, її SE = {se:.5f} на {len(y)} зображеннях. "
+        + ("У цих числах оптимістичності validation не видно. " if f1_gap >= 0 else "Оцінка на validation вища. ")
+        + "Розмір і склад вибірок впливають на напрям різниці.",
         markdown([{"true / predicted": CLASSES[i], **{c: int(matrix[i, j]) for j, c in enumerate(CLASSES)}} for i in range(6)]),
-        "![Матриця плутанини](figures/confusion.png)", markdown(errors), "![Помилки](figures/errors.png)",
-        "Плутанина glacier ↔ mountain є властивістю набору; перерозмітка чи зміна test не виконуються.",
-        "### Висновок",
-        f"За бюджету 304 кроки: delta_pre = {100 * effect['delta_pre']:.4f} п.п., "
-        f"delta_unf = {100 * effect['delta_unf']:.4f} п.п., R = {100 * effect['R']:.4f} п.п. "
-        "Інтерпретацію обох ефектів наведено окремо вище. За довшого навчання scratch міг би скоротити відставання.",
-        (f"Для нової задачі з 200 зображеннями на клас почав би з frozen: "
-         f"час {times['frozen']:.1f} с і розмах {100 * effect['range_frozen']:.4f} п.п.; "
-         "виграш unfreeze не перевищує R." if abs(effect["delta_unf"]) <= effect["R"] else
-         f"Для нової задачі з 200 зображеннями на клас взяв би {chosen['regime']}: "
-         f"результат validation за цього бюджету найвищий; середній час {times[chosen['regime']]:.1f} с, "
-         f"поріг шуму {100 * effect['R']:.4f} п.п.; переносимість виграшу потребує нової перевірки."),
-        "### Відтворюваність",
-        f"SHA-256 split.csv: `{split_hash(split)}`. У всіх семи журналах перевірено однаковий хеш. "
-        f"Коміти: {sorted({r['git']['commit'] for r in logs})}; "
-        f"наявність незакомічених змін на момент навчання: {any(r['git']['dirty'] for r in logs)}.",
-        f"Python {chosen['python']}, torch {chosen['torch']}, torchvision {chosen['torchvision']}; "
-        f"навчання {chosen['device_name']}, оцінка test CPU. Фіксовані налаштування умови збережено; "
-        "версії середовища наведено у pyproject.toml, uv.lock і run.json.",
-    ])
+        "[Рисунок матриці плутанини](figures/confusion.png) · [Зображення п’яти помилок](figures/errors.png)",
+        markdown(errors),
+        "Найчастіша плутанина — glacier ↔ mountain, що відображає подібність сцен у наборі.",
+        f"Python {chosen['python']}, torch {chosen['torch']}, torchvision {chosen['torchvision']}. "
+        f"Навчання на {chosen['device_name']}, test на CPU. SHA-256 поділу збігся в усіх семи журналах.",
+    ]
     report = out / ("README.md" if out == source else "report.md")
     prefix = "# Лабораторна робота №3"
     if out == source:

@@ -1,7 +1,6 @@
 """Select a threshold on validation, then evaluate the fixed rule on test."""
 
 import argparse
-import json
 from pathlib import Path
 
 import matplotlib
@@ -86,44 +85,38 @@ def main() -> None:
     errors.to_csv(out / "errors.csv", index=False)
     confusion = pd.DataFrame([[tn, fp], [fn, tp]], index=["true 0", "true 1"], columns=["predicted 0", "predicted 1"])
     confusion.to_csv(out / "test_confusion.csv")
-    sections = ["## Результати", markdown(split_summary(data)),
-                f"ROC-AUC на validation: **{auc:.8f}**.",
-                "### Пороги на validation", markdown(validation),
-                f"![PR]({figure_prefix}pr.png)\n\n![ROC]({figure_prefix}roc.png)",
-                "### Незалежні перевірки"]
-    for name, checked in checks.items():
-        sections.extend([f"Набір {name}, обраний поріг `{best_threshold(checked)}`. Збіг точний.", markdown(checked)])
-    sections.extend([
-        "A перевіряє одночасне включення однакових оцінок; B - вибір +inf за відсутності позитивних міток; "
-        "C - вибір більшого порога 0.8 за однакової вартості при 0.8 і 0.5.",
+    check_tables = pd.concat([table.assign(case=name) for name, table in checks.items()])
+    precision_text = f"{test_precision:.4g}" if test_precision is not None else "не визначена"
+    recall_text = f"{test_recall:.4g}" if test_recall is not None else "не визначена"
+    sections = [
+        "## Результати",
+        f"Поріг `{threshold:.17g}` зменшив вартість на test з **{baseline['C']} до {test['C']}**. "
+        f"FN змінилися з {baseline['FN']} до {fn}, FP — з {baseline['FP']} до {fp}.",
+        markdown(split_summary(data)), markdown(validation),
+        f"На validation ROC-AUC = **{auc:.4f}**. AUC оцінює ранжування за всіма порогами, "
+        "а вартість і precision залежать від конкретного порога й частки шахрайства. "
+        f"[PR]({figure_prefix}pr.png) · [ROC]({figure_prefix}roc.png) · "
+        f"[Усі кандидати]({figure_prefix}threshold_candidates.csv)",
+        "### Перевірки A/B/C",
+        "Повний перебір і швидкий пошук дали однакові лічильники. "
+        f"Пороги A/B/C — `{best_threshold(checks['A'])}`, `{best_threshold(checks['B'])}`, "
+        f"`{best_threshold(checks['C'])}`. A перевіряє однакові оцінки, B — відсутність позитивних міток, "
+        "C — вибір більшого порога за нічиєї.",
+        markdown(check_tables[["case", "threshold", "TP", "FP", "FN", "TN", "C"]]),
         "### Test", markdown(confusion.reset_index(names="class")),
-        f"C = **{test['C']}**, precision = **{test_precision}**, recall = **{test_recall}**. "
-        "Значення `None` означає нульовий знаменник і невизначену метрику.",
-        "### Перші FP/FN за номером рядка CSV", markdown(errors),
-    ])
-    for kind in ("FP", "FN"):
-        sample = errors[errors["type"] == kind]
-        if not sample.empty:
-            sections.append(f"{kind}: Amount у межах {sample.Amount.min():.2f}–{sample.Amount.max():.2f}; "
-                            f"медіана |score - t*| = {sample.score_minus_threshold.abs().median():.8g}.")
-    selected = validation.iloc[1]
-    standard = validation.iloc[0]
-    sections.extend([
-        "За десятьма прикладами не можна встановити причини помилок: це мала невипадкова вибірка, "
-        "а Amount не входить у формулу вартості.",
-        "### Висновок",
-        f"Поріг рішення змінено з 0.5 на `{threshold:.17g}`. На validation вартість C змінилася "
-        f"з {int(standard.C)} до {int(selected.C)}, FP з {int(standard.FP)} до {int(selected.FP)}, "
-        f"FN з {int(standard.FN)} до {int(selected.FN)}. На test кількість FN змінилася "
-        f"з {baseline['FN']} до {fn}, FP з {baseline['FP']} до {fp}, вартість C з {baseline['C']} до {test['C']}. "
-        "У test може бути інший склад транзакцій. Кількість позитивних і негативних прикладів "
-        "з оцінками між двома порогами визначає зміни FN, FP і вартості C, тому виграш може відрізнятися.",
-    ])
-    run = json.loads((out / "run.json").read_text(encoding="utf-8"))
-    sections.extend(["### Середовище навчання",
-                     ", ".join(f"{key}: {run[key]}" for key in
-                               ("python", "numpy", "pandas", "scikit_learn", "torch", "device", "torch_num_threads")) + ".",
-                     "Відтворення аналізу використовує збережені прогнози."])
+        f"Precision = {precision_text}, recall = {recall_text}. За нульового знаменника метрика не визначена.",
+        "Перші п’ять FP і FN за нульовим номером рядка CSV.", markdown(errors),
+    ]
+    error_stats = []
+    for kind, sample in errors.groupby("type", sort=False):
+        error_stats.append(f"{kind} — Amount {sample.Amount.min():.2f}–{sample.Amount.max():.2f}, "
+                           f"медіанна відстань до порога {sample.score_minus_threshold.abs().median():.4g}")
+    if error_stats:
+        sections.append(". ".join(error_stats) + ". Ці приклади не дають підстав встановити причину помилок.")
+    sections.append(
+        "Виграш може змінитися, бо між двома порогами на validation і test різна кількість шахрайських та звичайних транзакцій. "
+        f"[Середовище навчання]({figure_prefix}run.json)"
+    )
     prefix = "# Лабораторна робота №2"
     if submitted:
         prefix = report.read_text(encoding="utf-8").split("<!-- results -->", 1)[0].rstrip()

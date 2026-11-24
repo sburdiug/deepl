@@ -7,3 +7,9 @@ __pycache__/
 /lab2/.venv/
 /lab3/.venv/
 /lab3/runs/*/model.pt
+
+/lab2/notes.md
+/lab3/notes.md
+/lab4/notes.md
+/work
+/mkr
